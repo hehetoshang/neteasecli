@@ -101,6 +101,37 @@ neteasecli player volume [0-150]   # Get or set volume / 音量
 neteasecli player repeat [on|off]  # Toggle or set repeat / 单曲循环
 ```
 
+#### XiaoAI speaker backend / 小爱音箱播放
+
+Play through [open-xiaoai-bridge](https://github.com/coderzc/open-xiaoai-bridge)
+via URL relay (download → decode PCM → push to speaker), which supports
+pause/resume/seek controlled by the bridge. / 通过 open-xiaoai-bridge 中转推流播放
+（下载 → 解码 PCM → 推流到音箱），暂停/恢复/跳进度由 bridge 管理。
+
+```bash
+# Choose the xiaoai backend / 选择小爱播放后端
+NETEASECLI_PLAYER=xiaoai neteasecli track play <id>
+# Optional: bridge API base URL / 可选：bridge API 地址
+OPENXIAOAI_BASE_URL=http://127.0.0.1:9092
+```
+
+`volume` is not supported on the xiaoai backend. / 小爱后端不支持 `volume`。
+
+#### MCP server mode / MCP 服务器模式
+
+Expose music capabilities as MCP tools for AI agents (e.g. speaker voice
+dialogue routed through the bridge's MCP client). / 以 MCP 工具暴露音乐能力给
+AI（如经 bridge 的 MCP client 接入音箱语音对话）。
+
+```bash
+neteasecli mcp   # stdio transport
+```
+
+Tools: `search_track` / `play_track` / `pause` / `resume` / `stop` / `seek` /
+`status` / `repeat`. Pair with the bridge's `mcp_servers` config to let the
+speaker dialogue control NetEase music. / 工具列表如上；配合 bridge 的
+`mcp_servers` 配置即可让音箱语音对话控制网易云音乐。
+
 ### library
 
 ```bash

@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { getTrackDetail, getTrackUrl, getLyric, downloadTrack } from '../api/track.js';
-import { mpvPlayer } from '../player/mpv.js';
+import { getPlayer } from '../player/index.js';
 import { output, outputError } from '../output/json.js';
 import { ExitCode, type Quality } from '../types/index.js';
 
@@ -98,7 +98,7 @@ export function createTrackCommand(): Command {
         ]);
 
         const title = `${detail.name} - ${detail.artists.map((a) => a.name).join('/')}`;
-        await mpvPlayer.play(url, title);
+        await getPlayer().play(url, title);
 
         output({
           id,

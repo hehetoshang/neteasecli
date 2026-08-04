@@ -5,6 +5,7 @@ import { createPlaylistCommand } from './playlist.js';
 import { createLibraryCommand } from './library.js';
 import { createTrackCommand } from './track.js';
 import { createPlayerCommand } from './player.js';
+import { createMcpCommand } from './mcp.js';
 import { setOutputMode, setPrettyPrint, setQuietMode } from '../output/json.js';
 import { setNoColor } from '../output/color.js';
 import { setVerbose, setDebug } from '../output/logger.js';
@@ -48,6 +49,7 @@ export function createProgram(): Command {
   program.addCommand(createLibraryCommand());
   program.addCommand(createPlaylistCommand());
   program.addCommand(createPlayerCommand());
+  program.addCommand(createMcpCommand());
 
   return program;
 }

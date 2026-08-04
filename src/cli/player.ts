@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { mpvPlayer } from '../player/mpv.js';
+import { getPlayer } from '../player/index.js';
 import { output, outputError } from '../output/json.js';
 import { ExitCode } from '../types/index.js';
 
@@ -10,7 +10,7 @@ function formatTime(seconds: number): string {
 }
 
 async function requireRunning(): Promise<void> {
-  if (!(await mpvPlayer.isRunning())) {
+  if (!(await getPlayer().isRunning())) {
     outputError('PLAYER_ERROR', 'Nothing is playing');
     process.exit(ExitCode.GENERAL_ERROR);
   }
@@ -24,7 +24,7 @@ export function createPlayerCommand(): Command {
     .description('Current playback status')
     .action(async () => {
       try {
-        const status = await mpvPlayer.getStatus();
+        const status = await getPlayer().getStatus();
         if (!status.playing) {
           output({ playing: false, message: 'Nothing is playing' });
           return;
@@ -54,8 +54,8 @@ export function createPlayerCommand(): Command {
     .action(async () => {
       try {
         await requireRunning();
-        await mpvPlayer.pause();
-        const status = await mpvPlayer.getStatus();
+        await getPlayer().pause();
+        const status = await getPlayer().getStatus();
         output({
           paused: status.paused,
           message: status.paused ? 'Paused' : 'Resumed',
@@ -71,7 +71,7 @@ export function createPlayerCommand(): Command {
     .description('Stop playback')
     .action(async () => {
       try {
-        await mpvPlayer.stop();
+        await getPlayer().stop();
         output({ message: 'Stopped' });
       } catch (error) {
         outputError('PLAYER_ERROR', error instanceof Error ? error.message : 'Failed');
@@ -92,8 +92,8 @@ export function createPlayerCommand(): Command {
           process.exit(ExitCode.GENERAL_ERROR);
           return;
         }
-        await mpvPlayer.seek(secs, opts.absolute ? 'absolute' : 'relative');
-        const status = await mpvPlayer.getStatus();
+        await getPlayer().seek(secs, opts.absolute ? 'absolute' : 'relative');
+        const status = await getPlayer().getStatus();
         output({
           position: status.position,
           duration: status.duration,
@@ -120,10 +120,10 @@ export function createPlayerCommand(): Command {
             process.exit(ExitCode.GENERAL_ERROR);
             return;
           }
-          await mpvPlayer.setVolume(vol);
+          await getPlayer().setVolume(vol);
           output({ volume: vol, message: `Volume: ${vol}%` });
         } else {
-          const vol = await mpvPlayer.getVolume();
+          const vol = await getPlayer().getVolume();
           output({ volume: vol, message: `Volume: ${Math.round(vol)}%` });
         }
       } catch (error) {
@@ -139,12 +139,12 @@ export function createPlayerCommand(): Command {
       try {
         await requireRunning();
         if (mode !== undefined) {
-          await mpvPlayer.setLoop(mode === 'on' ? 'inf' : 'no');
+          await getPlayer().setLoop(mode === 'on' ? 'inf' : 'no');
           output({ repeat: mode === 'on', message: `Repeat: ${mode}` });
         } else {
-          const current = await mpvPlayer.getLoop();
+          const current = await getPlayer().getLoop();
           const isOn = current !== 'no' && current !== 'false';
-          await mpvPlayer.setLoop(isOn ? 'no' : 'inf');
+          await getPlayer().setLoop(isOn ? 'no' : 'inf');
           output({ repeat: !isOn, message: `Repeat: ${!isOn ? 'on' : 'off'}` });
         }
       } catch (error) {

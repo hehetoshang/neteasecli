@@ -47,6 +47,7 @@
     "url": "https://github.com/wangwalk/neteasecli.git"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@steipete/sweet-cookie": "^0.1.0",
     "axios": "^1.6.0",
     "commander": "^12.0.0"
