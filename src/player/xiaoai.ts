@@ -10,19 +10,15 @@
 
 import axios from 'axios';
 import type { Player, PlayerStatus } from './types.js';
-
-const DEFAULT_BASE_URL = 'http://127.0.0.1:9092';
+import { bridgeClientConfig } from './bridge-security.js';
 
 // 网易云流 URL 防盗链检查的浏览器 UA
 const NET_EASE_UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0';
 
-function getBaseUrl(): string {
-  return (process.env.OPENXIAOAI_BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, '');
-}
-
 export class XiaoAiPlayer implements Player {
-  private client = axios.create({ timeout: 30_000 });
+  private readonly baseUrl: string;
+  private readonly client;
   private currentTitle?: string;
   private currentDuration = 0;
   private loop = false;
@@ -35,8 +31,14 @@ export class XiaoAiPlayer implements Player {
     loop: 'no',
   };
 
+  constructor() {
+    const config = bridgeClientConfig();
+    this.baseUrl = config.baseUrl;
+    this.client = axios.create(config.axios);
+  }
+
   async play(url: string, title?: string): Promise<void> {
-    const response = await this.client.post(`${getBaseUrl()}/api/stream/play`, {
+    const response = await this.client.post(`${this.baseUrl}/api/stream/play`, {
       url,
       loop: this.loop,
       headers: { 'User-Agent': NET_EASE_UA },
@@ -60,9 +62,7 @@ export class XiaoAiPlayer implements Player {
   async pause(): Promise<void> {
     const status = await this.getStatus();
     const response = await this.client.post(
-      status.paused
-        ? `${getBaseUrl()}/api/stream/resume`
-        : `${getBaseUrl()}/api/stream/pause`,
+      status.paused ? `${this.baseUrl}/api/stream/resume` : `${this.baseUrl}/api/stream/pause`,
     );
     if (!response.data?.success) {
       throw new Error(response.data?.error || 'bridge pause failed');
@@ -71,18 +71,17 @@ export class XiaoAiPlayer implements Player {
   }
 
   async stop(): Promise<void> {
-    await this.client.post(`${getBaseUrl()}/api/stream/stop`).catch(() => {});
+    await this.client.post(`${this.baseUrl}/api/stream/stop`).catch(() => {});
     this.lastStatus = { ...this.lastStatus, playing: false, paused: false, position: 0 };
   }
 
   async seek(seconds: number, mode: 'relative' | 'absolute' = 'relative'): Promise<void> {
     const status = await this.getStatus();
-    const target =
-      mode === 'absolute' ? seconds : (status.position || 0) + seconds;
+    const target = mode === 'absolute' ? seconds : (status.position || 0) + seconds;
     if (target < 0) {
       throw new Error('Cannot seek before start');
     }
-    const response = await this.client.post(`${getBaseUrl()}/api/stream/seek`, {
+    const response = await this.client.post(`${this.baseUrl}/api/stream/seek`, {
       position_ms: Math.round(target * 1000),
     });
     if (!response.data?.success) {
@@ -112,7 +111,7 @@ export class XiaoAiPlayer implements Player {
 
   async getStatus(): Promise<PlayerStatus> {
     try {
-      const response = await this.client.get(`${getBaseUrl()}/api/stream/status`);
+      const response = await this.client.get(`${this.baseUrl}/api/stream/status`);
       const data = response.data?.data;
       if (data) {
         this.lastStatus = {

@@ -115,6 +115,18 @@ NETEASECLI_PLAYER=xiaoai neteasecli track play <id>
 OPENXIAOAI_BASE_URL=http://127.0.0.1:9092
 ```
 
+bridge 控制面必须认证。默认会读取 bridge 首次启动生成的
+`~/.config/open-xiaoai-bridge/api-token`；也可设置
+`OPENXIAOAI_API_TOKEN_FILE` 或至少 32 字符的 `OPENXIAOAI_API_TOKEN`。token
+文件在 Unix 上必须是 `0600`。非 loopback 地址默认拒绝明文 HTTP，请配置
+HTTPS；mTLS 可进一步设置 `OPENXIAOAI_TLS_CA`、
+`OPENXIAOAI_TLS_CLIENT_CERT` 和 `OPENXIAOAI_TLS_CLIENT_KEY`。迁移期的
+`OPENXIAOAI_ALLOW_INSECURE_HTTP=1` 会明文暴露凭据，不应作为长期配置。
+
+bridge 会使用本播放器实际输出的 24 kHz PCM 作为 AEC 参考，在 KWS/VAD 前
+处理 16 kHz 麦克风音频；参数、诊断和实机对照测试见 bridge 的
+`docs/security-and-aec.md`。
+
 `volume` is not supported on the xiaoai backend. / 小爱后端不支持 `volume`。
 
 #### MCP server mode / MCP 服务器模式
