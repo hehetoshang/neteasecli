@@ -7,7 +7,7 @@ Search, play, download, and manage your library — all from the terminal with s
 ## Features
 
 - Search tracks, albums, artists, playlists
-- Playback via [mpv](https://mpv.io/) with IPC control (play/pause/stop/seek/volume/repeat)
+- Playback via [mpv](https://mpv.io/) with persistent queues, automatic advance, previous/next, and IPC control
 - Track info, streaming URLs, lyrics, download
 - Library management (liked tracks, recent history)
 - Playlist browsing
@@ -49,6 +49,9 @@ bun add -g neteasecli
 neteasecli auth login                    # Import cookies from browser
 neteasecli search track "Sunny Day"      # Search
 neteasecli track play 185868             # Play (requires mpv)
+neteasecli library play-liked --shuffle  # Continuously play liked tracks
+neteasecli playlist play <id>            # Continuously play a playlist
+neteasecli player next                   # Skip to the next track
 neteasecli player pause                  # Pause/resume
 neteasecli player stop                   # Stop
 ```
@@ -99,7 +102,23 @@ neteasecli player seek <seconds>   # Seek relative (e.g. 10, -10) / 快进快退
 neteasecli player seek 30 --absolute  # Seek to absolute position / 跳转到指定位置
 neteasecli player volume [0-150]   # Get or set volume / 音量
 neteasecli player repeat [on|off]  # Toggle or set repeat / 单曲循环
+neteasecli player next             # Next track / 下一曲
+neteasecli player previous         # Previous track / 上一曲
+neteasecli player queue            # Show queue and current track / 查看队列
+neteasecli player queue add <id...>       # Add tracks / 添加歌曲
+neteasecli player queue remove <position> # Remove by 1-based position / 删除歌曲
+neteasecli player queue play [position]   # Start queue / 从指定位置播放
+neteasecli player queue clear             # Stop and clear queue / 停止并清空
 ```
+
+`next` at the final track stops playback and marks the queue finished. `previous`
+at the first track returns an error. `stop` preserves the queue so it can be
+started again with `player queue play`; `queue clear` removes it. Single-track
+repeat holds the current queue position, and disabling repeat restores automatic
+advance. Queue state and playback history are stored per profile under
+`~/.config/neteasecli/profiles/<profile>/player-queue.json` with user-only
+permissions. A lightweight monitor process is started automatically while a
+queue is active, so playback continues after the initiating CLI command exits.
 
 #### XiaoAI speaker backend / 小爱音箱播放
 
@@ -139,8 +158,9 @@ AI（如经 bridge 的 MCP client 接入音箱语音对话）。
 neteasecli mcp   # stdio transport
 ```
 
-Tools: `search_track` / `play_track` / `pause` / `resume` / `stop` / `seek` /
-`status` / `repeat`. Pair with the bridge's `mcp_servers` config to let the
+Tools: `search_track` / `play_track` / `play_liked` / `play_playlist` /
+`next_track` / `previous_track` / `queue_status` / `pause` / `resume` / `stop` /
+`seek` / `status` / `repeat`. Pair with the bridge's `mcp_servers` config to let the
 speaker dialogue control NetEase music. / 工具列表如上；配合 bridge 的
 `mcp_servers` 配置即可让音箱语音对话控制网易云音乐。
 
@@ -148,6 +168,8 @@ speaker dialogue control NetEase music. / 工具列表如上；配合 bridge 的
 
 ```bash
 neteasecli library liked           # Liked tracks / 喜欢的音乐
+neteasecli library play-liked      # Continuously play liked tracks / 连续播放喜欢的音乐
+neteasecli library play-liked --limit 20 --shuffle --quality lossless
 neteasecli library like <id>       # Like a track / 收藏
 neteasecli library unlike <id>     # Unlike / 取消收藏
 neteasecli library recent          # Recently played / 最近播放
@@ -158,6 +180,8 @@ neteasecli library recent          # Recently played / 最近播放
 ```bash
 neteasecli playlist list           # My playlists / 我的歌单
 neteasecli playlist detail <id>    # Playlist tracks / 歌单详情
+neteasecli playlist play <id>      # Continuously play playlist / 连续播放歌单
+neteasecli playlist play <id> --limit 20 --shuffle --quality exhigh
 ```
 
 ## Global Options / 全局选项
@@ -211,6 +235,9 @@ Profiles are stored in `~/.config/neteasecli/profiles/<name>/`.
 - Node.js >= 24
 - Chrome, Edge, Firefox, or Safari (for cookie import / 用于导入 Cookie)
 - [mpv](https://mpv.io/) (optional, for playback / 可选，用于播放)
+- [open-xiaoai-bridge](https://github.com/coderzc/open-xiaoai-bridge) (optional,
+  required only when `NETEASECLI_PLAYER=xiaoai`; its authenticated stream API
+  must remain reachable while the queue is playing / 仅小爱后端需要)
 - macOS, Linux, or Windows
 
 ## Legal / 免责

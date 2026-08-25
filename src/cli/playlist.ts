@@ -2,9 +2,48 @@ import { Command } from 'commander';
 import { getUserPlaylists, getPlaylistDetail } from '../api/playlist.js';
 import { output, outputError } from '../output/json.js';
 import { ExitCode } from '../types/index.js';
+import type { Quality } from '../types/index.js';
+import { getQueueController } from '../player/queue.js';
+import { buildQueueTracks, shuffled } from '../player/queue-tracks.js';
 
 export function createPlaylistCommand(): Command {
   const playlist = new Command('playlist').description('Playlists');
+
+  playlist
+    .command('play')
+    .description('Continuously play a playlist')
+    .argument('<id>', 'Playlist ID')
+    .option('-l, --limit <number>', 'Track count limit')
+    .option('--shuffle', 'Shuffle before playback')
+    .option('-q, --quality <level>', 'Quality: standard/higher/exhigh/lossless/hires', 'exhigh')
+    .action(async (id: string, options) => {
+      try {
+        const detail = await getPlaylistDetail(id);
+        let tracks = detail.tracks || [];
+        if (options.limit !== undefined) {
+          const limit = Number.parseInt(options.limit, 10);
+          if (!Number.isInteger(limit) || limit < 1)
+            throw new Error('Limit must be a positive integer');
+          tracks = tracks.slice(0, limit);
+        }
+        if (options.shuffle) tracks = shuffled(tracks);
+        const built = await buildQueueTracks(tracks, options.quality as Quality);
+        if (built.tracks.length === 0) throw new Error('This playlist has no playable tracks');
+        const queue = await getQueueController().start(built.tracks);
+        output({
+          playlist: { id: detail.id, name: detail.name },
+          current: queue.current,
+          queued: queue.tracks.length,
+          skipped: built.skipped,
+          shuffle: Boolean(options.shuffle),
+          quality: options.quality,
+          message: `Playing playlist ${detail.name}: ${queue.current?.title} (${queue.tracks.length} queued)`,
+        });
+      } catch (error) {
+        outputError('PLAYER_ERROR', error instanceof Error ? error.message : 'Playback failed');
+        process.exit(ExitCode.GENERAL_ERROR);
+      }
+    });
 
   playlist
     .command('list')

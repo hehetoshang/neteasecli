@@ -11,6 +11,7 @@ import { setNoColor } from '../output/color.js';
 import { setVerbose, setDebug } from '../output/logger.js';
 import { setProfile } from '../auth/storage.js';
 import { setRequestTimeout } from '../api/client.js';
+import { runQueueWorker } from '../player/queue.js';
 
 export function createProgram(): Command {
   const program = new Command();
@@ -50,6 +51,10 @@ export function createProgram(): Command {
   program.addCommand(createPlaylistCommand());
   program.addCommand(createPlayerCommand());
   program.addCommand(createMcpCommand());
+  program
+    .command('__queue-worker', { hidden: true })
+    .description('Internal playback queue monitor')
+    .action(async () => runQueueWorker());
 
   return program;
 }

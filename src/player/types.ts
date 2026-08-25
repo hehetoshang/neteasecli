@@ -10,9 +10,13 @@ export interface PlayerStatus {
   loop: string;
 }
 
+export interface PlayerPlayOptions {
+  loop?: boolean;
+}
+
 export interface Player {
   /** 播放音频 URL（替换当前播放） */
-  play(url: string, title?: string): Promise<void>;
+  play(url: string, title?: string, options?: PlayerPlayOptions): Promise<void>;
   /** 切换暂停/恢复 */
   pause(): Promise<void>;
   /** 停止播放 */
