@@ -310,7 +310,14 @@ export class QueueController {
       const state = await this.store.read();
       state.repeat = on;
       if (state.status === 'playing' || state.status === 'paused') {
-        await this.player.setLoop(on ? 'inf' : 'no');
+        const current = state.currentIndex === null ? undefined : state.tracks[state.currentIndex];
+        const playerStatus = await this.player.getStatus();
+        await this.player.setLoop(
+          on ? 'inf' : 'no',
+          current
+            ? { url: current.url, title: current.title, position: playerStatus.position }
+            : undefined,
+        );
       }
       await this.save(state);
       return toSnapshot(state);

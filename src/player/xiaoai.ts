@@ -9,7 +9,7 @@
  */
 
 import axios from 'axios';
-import type { Player, PlayerPlayOptions, PlayerStatus } from './types.js';
+import type { Player, PlayerLoopContext, PlayerPlayOptions, PlayerStatus } from './types.js';
 import { bridgeClientConfig } from './bridge-security.js';
 
 // 网易云流 URL 防盗链检查的浏览器 UA
@@ -54,6 +54,7 @@ export class XiaoAiPlayer implements Player {
   private readonly baseUrl: string;
   private readonly client;
   private currentTitle?: string;
+  private currentUrl?: string;
   private currentDuration = 0;
   private loop = false;
   private lastStatus: PlayerStatus = {
@@ -92,6 +93,7 @@ export class XiaoAiPlayer implements Player {
       );
     }
     this.currentTitle = title;
+    this.currentUrl = url;
     this.currentDuration = Math.floor((response.data.data?.duration_ms || 0) / 1000);
     this.lastStatus = {
       title: this.currentTitle,
@@ -117,6 +119,7 @@ export class XiaoAiPlayer implements Player {
 
   async stop(): Promise<void> {
     await this.client.post(`${this.baseUrl}/api/stream/stop`).catch(() => {});
+    this.currentUrl = undefined;
     this.lastStatus = { ...this.lastStatus, playing: false, paused: false, position: 0 };
   }
 
@@ -143,11 +146,35 @@ export class XiaoAiPlayer implements Player {
     throw new Error('not supported on xiaoai player');
   }
 
-  async setLoop(mode: 'no' | 'inf' | 'force'): Promise<void> {
-    this.loop = mode !== 'no';
+  async setLoop(mode: 'no' | 'inf' | 'force', context?: PlayerLoopContext): Promise<void> {
+    const loop = mode !== 'no';
+    const status = await this.getStatus();
+    const currentlyLooping = status.loop !== 'no' && status.loop !== 'false';
+    if (currentlyLooping === loop) {
+      this.loop = loop;
+      return;
+    }
+
+    const url = context?.url || this.currentUrl;
+    if (status.playing && url) {
+      const response = await this.client.post(`${this.baseUrl}/api/stream/play`, {
+        url,
+        loop,
+        start_ms: Math.round((context?.position ?? status.position) * 1000),
+        headers: { 'User-Agent': NET_EASE_UA },
+      });
+      if (!response.data?.success) {
+        throw new Error(response.data?.error || 'bridge repeat update failed');
+      }
+      this.currentUrl = url;
+      this.currentTitle = context?.title || this.currentTitle;
+      if (status.paused) {
+        await this.client.post(`${this.baseUrl}/api/stream/pause`);
+        this.lastStatus.paused = true;
+      }
+    }
+    this.loop = loop;
     this.lastStatus.loop = this.loop ? 'inf' : 'no';
-    // 已播放中的歌曲需要重新设置循环：重新以当前 URL 播放会从头开始，
-    // 因此只更新标志，从下一首生效（与 MCP 的 repeat 工具语义一致）。
   }
 
   async getLoop(): Promise<string> {
@@ -159,6 +186,7 @@ export class XiaoAiPlayer implements Player {
       const response = await this.client.get(`${this.baseUrl}/api/stream/status`);
       const data = response.data?.data;
       if (data) {
+        this.loop = Boolean(data.loop);
         this.lastStatus = {
           title: this.currentTitle,
           position: Math.floor((data.position_ms || 0) / 1000),

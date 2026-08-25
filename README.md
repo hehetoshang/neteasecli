@@ -119,6 +119,9 @@ advance. Queue state and playback history are stored per profile under
 `~/.config/neteasecli/profiles/<profile>/player-queue.json` with user-only
 permissions. A lightweight monitor process is started automatically while a
 queue is active, so playback continues after the initiating CLI command exits.
+On XiaoAI, changing repeat while a track is active reloads the bridge stream at
+the current position because the bridge has no in-place loop toggle; this may
+cause a brief interruption but keeps queue semantics consistent with mpv.
 
 #### XiaoAI speaker backend / 小爱音箱播放
 
