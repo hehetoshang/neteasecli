@@ -9,7 +9,7 @@
  */
 
 import axios from 'axios';
-import type { Player, PlayerStatus } from './types.js';
+import type { Player, PlayerPlayOptions, PlayerStatus } from './types.js';
 import { bridgeClientConfig } from './bridge-security.js';
 
 // 网易云流 URL 防盗链检查的浏览器 UA
@@ -37,7 +37,8 @@ export class XiaoAiPlayer implements Player {
     this.client = axios.create(config.axios);
   }
 
-  async play(url: string, title?: string): Promise<void> {
+  async play(url: string, title?: string, options?: PlayerPlayOptions): Promise<void> {
+    if (options?.loop !== undefined) this.loop = options.loop;
     const response = await this.client.post(`${this.baseUrl}/api/stream/play`, {
       url,
       loop: this.loop,
@@ -119,7 +120,7 @@ export class XiaoAiPlayer implements Player {
           position: Math.floor((data.position_ms || 0) / 1000),
           duration: Math.floor((data.duration_ms || this.currentDuration) / 1000),
           paused: data.state === 'paused',
-          playing: data.state === 'playing',
+          playing: data.state === 'playing' || data.state === 'paused',
           volume: 100,
           loop: data.loop ? 'inf' : 'no',
         };
