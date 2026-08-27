@@ -17,6 +17,11 @@ import { getPlayer } from '../player/index.js';
 import type { Quality } from '../types/index.js';
 import { PLAYBACK_STARTED_OUTPUT_SCHEMA, playbackStartedResult } from './result-signals.js';
 
+export {
+  PLAYBACK_STARTED_SIGNAL as SILENT_PLAYBACK_TERMINATION,
+  playbackStartedResult,
+} from './result-signals.js';
+
 const QUALITY_VALUES = ['standard', 'higher', 'exhigh', 'lossless', 'hires'] as const;
 
 function formatTrack(track: {
