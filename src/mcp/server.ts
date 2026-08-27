@@ -18,7 +18,27 @@ import type { Quality } from '../types/index.js';
 
 const QUALITY_VALUES = ['standard', 'higher', 'exhigh', 'lossless', 'hires'] as const;
 
-function formatTrack(track: { id: string; name: string; artists: { name: string }[]; duration?: number }) {
+export const SILENT_PLAYBACK_TERMINATION = {
+  version: 1,
+  action: 'end_turn_silently',
+  reason: 'playback_started',
+} as const;
+
+export function playbackStartedResult(text: string) {
+  return {
+    content: [{ type: 'text' as const, text }],
+    structuredContent: {
+      'x-open-xiaoai-bridge': SILENT_PLAYBACK_TERMINATION,
+    },
+  };
+}
+
+function formatTrack(track: {
+  id: string;
+  name: string;
+  artists: { name: string }[];
+  duration?: number;
+}) {
   const artist = track.artists.map((a) => a.name).join('/');
   const minutes = Math.floor((track.duration || 0) / 60000);
   const secs = Math.floor(((track.duration || 0) % 60000) / 1000);
@@ -99,14 +119,7 @@ export async function startMcpServer(): Promise<void> {
         await player.setLoop('no');
       }
       await player.play(url, title);
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: `正在播放：${title}${loop ? '（单曲循环）' : ''}`,
-          },
-        ],
-      };
+      return playbackStartedResult(`正在播放：${title}${loop ? '（单曲循环）' : ''}`);
     },
   );
 
@@ -212,7 +225,9 @@ export async function startMcpServer(): Promise<void> {
     },
     async ({ on }) => {
       await getPlayer().setLoop(on ? 'inf' : 'no');
-      return { content: [{ type: 'text' as const, text: on ? '已开启单曲循环' : '已关闭单曲循环' }] };
+      return {
+        content: [{ type: 'text' as const, text: on ? '已开启单曲循环' : '已关闭单曲循环' }],
+      };
     },
   );
 
