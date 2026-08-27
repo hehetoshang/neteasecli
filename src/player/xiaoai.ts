@@ -16,6 +16,40 @@ import { bridgeClientConfig } from './bridge-security.js';
 const NET_EASE_UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0';
 
+function sanitizeBridgeError(value: unknown): string {
+  const text = typeof value === 'string' ? value : String(value ?? 'unknown error');
+  return text
+    .replace(/bearer\s+[a-z0-9._~+/-]+/gi, 'Bearer <redacted>')
+    .replace(/(api[_ -]?key|authorization|token)(\s*[:=]\s*)\S+/gi, '$1$2<redacted>')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 300);
+}
+
+export function bridgeRequestError(method: string, path: string, error: unknown): Error {
+  if (!axios.isAxiosError(error)) {
+    return new Error(
+      `open-xiaoai-bridge ${method} ${path} failed: ${sanitizeBridgeError(
+        error instanceof Error ? error.message : error,
+      )}`,
+    );
+  }
+  const data = error.response?.data;
+  const reason =
+    data && typeof data === 'object'
+      ? ((data as { error?: unknown; message?: unknown }).error ??
+        (data as { error?: unknown; message?: unknown }).message)
+      : undefined;
+  const status = error.response?.status
+    ? `HTTP ${error.response.status}`
+    : error.code || 'request error';
+  return new Error(
+    `open-xiaoai-bridge ${method} ${path} failed (${status}): ${sanitizeBridgeError(
+      reason ?? error.message,
+    )}`,
+  );
+}
+
 export class XiaoAiPlayer implements Player {
   private readonly baseUrl: string;
   private readonly client;
@@ -38,13 +72,23 @@ export class XiaoAiPlayer implements Player {
   }
 
   async play(url: string, title?: string): Promise<void> {
-    const response = await this.client.post(`${this.baseUrl}/api/stream/play`, {
-      url,
-      loop: this.loop,
-      headers: { 'User-Agent': NET_EASE_UA },
-    });
+    const path = '/api/stream/play';
+    let response;
+    try {
+      response = await this.client.post(`${this.baseUrl}${path}`, {
+        url,
+        loop: this.loop,
+        headers: { 'User-Agent': NET_EASE_UA },
+      });
+    } catch (error) {
+      throw bridgeRequestError('POST', path, error);
+    }
     if (!response.data?.success) {
-      throw new Error(response.data?.error || 'bridge play failed');
+      throw new Error(
+        `open-xiaoai-bridge POST ${path} returned success=false: ${sanitizeBridgeError(
+          response.data?.error,
+        )}`,
+      );
     }
     this.currentTitle = title;
     this.currentDuration = Math.floor((response.data.data?.duration_ms || 0) / 1000);
