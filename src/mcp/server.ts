@@ -15,10 +15,21 @@ import { search } from '../api/search.js';
 import { getTrackDetail, getTrackUrl } from '../api/track.js';
 import { getPlayer } from '../player/index.js';
 import type { Quality } from '../types/index.js';
+import { PLAYBACK_STARTED_OUTPUT_SCHEMA, playbackStartedResult } from './result-signals.js';
+
+export {
+  PLAYBACK_STARTED_SIGNAL as SILENT_PLAYBACK_TERMINATION,
+  playbackStartedResult,
+} from './result-signals.js';
 
 const QUALITY_VALUES = ['standard', 'higher', 'exhigh', 'lossless', 'hires'] as const;
 
-function formatTrack(track: { id: string; name: string; artists: { name: string }[]; duration?: number }) {
+function formatTrack(track: {
+  id: string;
+  name: string;
+  artists: { name: string }[];
+  duration?: number;
+}) {
   const artist = track.artists.map((a) => a.name).join('/');
   const minutes = Math.floor((track.duration || 0) / 60000);
   const secs = Math.floor(((track.duration || 0) % 60000) / 1000);
@@ -73,17 +84,24 @@ export async function startMcpServer(): Promise<void> {
         quality: z.enum(QUALITY_VALUES).optional().default('exhigh').describe('音质'),
         loop: z.boolean().optional().default(false).describe('单曲循环'),
       },
+      outputSchema: PLAYBACK_STARTED_OUTPUT_SCHEMA,
     },
     async ({ track_id, query, quality, loop }) => {
       let id = track_id;
       if (!id) {
         if (!query) {
-          return { content: [{ type: 'text' as const, text: '必须提供 track_id 或 query' }] };
+          return {
+            content: [{ type: 'text' as const, text: '必须提供 track_id 或 query' }],
+            isError: true,
+          };
         }
         const result = await search(query, 'track', 1);
         const first = result.tracks?.[0];
         if (!first) {
-          return { content: [{ type: 'text' as const, text: `未找到与 "${query}" 相关的歌曲` }] };
+          return {
+            content: [{ type: 'text' as const, text: `未找到与 "${query}" 相关的歌曲` }],
+            isError: true,
+          };
         }
         id = first.id;
       }
@@ -99,14 +117,7 @@ export async function startMcpServer(): Promise<void> {
         await player.setLoop('no');
       }
       await player.play(url, title);
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: `正在播放：${title}${loop ? '（单曲循环）' : ''}`,
-          },
-        ],
-      };
+      return playbackStartedResult(`正在播放：${title}${loop ? '（单曲循环）' : ''}`);
     },
   );
 
@@ -212,7 +223,9 @@ export async function startMcpServer(): Promise<void> {
     },
     async ({ on }) => {
       await getPlayer().setLoop(on ? 'inf' : 'no');
-      return { content: [{ type: 'text' as const, text: on ? '已开启单曲循环' : '已关闭单曲循环' }] };
+      return {
+        content: [{ type: 'text' as const, text: on ? '已开启单曲循环' : '已关闭单曲循环' }],
+      };
     },
   );
 
