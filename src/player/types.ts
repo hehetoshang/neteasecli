@@ -10,9 +10,19 @@ export interface PlayerStatus {
   loop: string;
 }
 
+export interface PlayerPlayOptions {
+  loop?: boolean;
+}
+
+export interface PlayerLoopContext {
+  url: string;
+  title?: string;
+  position?: number;
+}
+
 export interface Player {
   /** 播放音频 URL（替换当前播放） */
-  play(url: string, title?: string): Promise<void>;
+  play(url: string, title?: string, options?: PlayerPlayOptions): Promise<void>;
   /** 切换暂停/恢复 */
   pause(): Promise<void>;
   /** 停止播放 */
@@ -21,7 +31,7 @@ export interface Player {
   seek(seconds: number, mode?: 'relative' | 'absolute'): Promise<void>;
   setVolume(volume: number): Promise<void>;
   getVolume(): Promise<number>;
-  setLoop(mode: 'no' | 'inf' | 'force'): Promise<void>;
+  setLoop(mode: 'no' | 'inf' | 'force', context?: PlayerLoopContext): Promise<void>;
   getLoop(): Promise<string>;
   getStatus(): Promise<PlayerStatus>;
   isRunning(): Promise<boolean>;

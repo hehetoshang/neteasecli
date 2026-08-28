@@ -1,7 +1,10 @@
 import { Command } from 'commander';
 import { getPlayer } from '../player/index.js';
+import { getQueueController } from '../player/queue.js';
+import { buildQueueTracks } from '../player/queue-tracks.js';
+import { getTrackDetails } from '../api/track.js';
 import { output, outputError } from '../output/json.js';
-import { ExitCode } from '../types/index.js';
+import { ExitCode, type Quality } from '../types/index.js';
 
 function formatTime(seconds: number): string {
   const mins = Math.floor(seconds / 60);
@@ -10,7 +13,8 @@ function formatTime(seconds: number): string {
 }
 
 async function requireRunning(): Promise<void> {
-  if (!(await getPlayer().isRunning())) {
+  const status = await getQueueController().getStatus();
+  if (!status.player.playing) {
     outputError('PLAYER_ERROR', 'Nothing is playing');
     process.exit(ExitCode.GENERAL_ERROR);
   }
@@ -24,9 +28,15 @@ export function createPlayerCommand(): Command {
     .description('Current playback status')
     .action(async () => {
       try {
-        const status = await getPlayer().getStatus();
+        const { player: status, queue } = await getQueueController().getStatus();
         if (!status.playing) {
-          output({ playing: false, message: 'Nothing is playing' });
+          output({
+            playing: false,
+            queueStatus: queue.status,
+            current: queue.current,
+            queueLength: queue.tracks.length,
+            message: 'Nothing is playing',
+          });
           return;
         }
         const repeat = status.loop !== 'no' && status.loop !== 'false';
@@ -40,6 +50,9 @@ export function createPlayerCommand(): Command {
           durationFormatted: formatTime(status.duration),
           volume: Math.round(status.volume),
           repeat,
+          currentIndex: queue.currentIndex,
+          queueLength: queue.tracks.length,
+          remaining: queue.remaining,
           message: `${status.paused ? '⏸' : '▶'} ${status.title || 'Unknown'} ${formatTime(status.position)}/${formatTime(status.duration)} vol:${Math.round(status.volume)}%${repeat ? ' 🔁' : ''}`,
         });
       } catch (error) {
@@ -54,8 +67,7 @@ export function createPlayerCommand(): Command {
     .action(async () => {
       try {
         await requireRunning();
-        await getPlayer().pause();
-        const status = await getPlayer().getStatus();
+        const status = await getQueueController().pause();
         output({
           paused: status.paused,
           message: status.paused ? 'Paused' : 'Resumed',
@@ -71,7 +83,7 @@ export function createPlayerCommand(): Command {
     .description('Stop playback')
     .action(async () => {
       try {
-        await getPlayer().stop();
+        await getQueueController().stop();
         output({ message: 'Stopped' });
       } catch (error) {
         outputError('PLAYER_ERROR', error instanceof Error ? error.message : 'Failed');
@@ -139,16 +151,151 @@ export function createPlayerCommand(): Command {
       try {
         await requireRunning();
         if (mode !== undefined) {
-          await getPlayer().setLoop(mode === 'on' ? 'inf' : 'no');
+          if (mode !== 'on' && mode !== 'off') throw new Error('Repeat mode must be on or off');
+          await getQueueController().setRepeat(mode === 'on');
           output({ repeat: mode === 'on', message: `Repeat: ${mode}` });
         } else {
-          const current = await getPlayer().getLoop();
-          const isOn = current !== 'no' && current !== 'false';
-          await getPlayer().setLoop(isOn ? 'no' : 'inf');
+          const current = await getQueueController().getSnapshot();
+          const isOn = current.repeat;
+          await getQueueController().setRepeat(!isOn);
           output({ repeat: !isOn, message: `Repeat: ${!isOn ? 'on' : 'off'}` });
         }
       } catch (error) {
         outputError('PLAYER_ERROR', error instanceof Error ? error.message : 'Failed');
+        process.exit(ExitCode.GENERAL_ERROR);
+      }
+    });
+
+  player
+    .command('next')
+    .description('Play the next track in the queue')
+    .action(async () => {
+      try {
+        const current = await getQueueController().next();
+        output({
+          current,
+          finished: current === null,
+          message: current ? `Now playing: ${current.title}` : 'End of queue',
+        });
+      } catch (error) {
+        outputError('QUEUE_ERROR', error instanceof Error ? error.message : 'Failed');
+        process.exit(ExitCode.GENERAL_ERROR);
+      }
+    });
+
+  player
+    .command('previous')
+    .alias('prev')
+    .description('Play the previous track in the queue')
+    .action(async () => {
+      try {
+        const current = await getQueueController().previous();
+        output({ current, message: `Now playing: ${current.title}` });
+      } catch (error) {
+        outputError('QUEUE_ERROR', error instanceof Error ? error.message : 'Failed');
+        process.exit(ExitCode.GENERAL_ERROR);
+      }
+    });
+
+  const queue = player
+    .command('queue')
+    .description('View and manage the playback queue')
+    .action(async () => {
+      try {
+        const snapshot = await getQueueController().sync();
+        output({
+          status: snapshot.status,
+          currentIndex: snapshot.currentIndex,
+          current: snapshot.current,
+          remaining: snapshot.remaining,
+          repeat: snapshot.repeat,
+          history: snapshot.history,
+          tracks: snapshot.tracks.map((track, index) => ({
+            ...track,
+            position: index + 1,
+            current: index === snapshot.currentIndex,
+            name: `${index === snapshot.currentIndex ? '▶ ' : ''}${track.title}`,
+            artist: '',
+          })),
+          total: snapshot.tracks.length,
+          showing: snapshot.tracks.length,
+        });
+      } catch (error) {
+        outputError('QUEUE_ERROR', error instanceof Error ? error.message : 'Failed');
+        process.exit(ExitCode.GENERAL_ERROR);
+      }
+    });
+
+  queue
+    .command('add')
+    .description('Add one or more track IDs to the queue')
+    .argument('<ids...>', 'Track IDs')
+    .option('-q, --quality <level>', 'Quality: standard/higher/exhigh/lossless/hires', 'exhigh')
+    .action(async (ids: string[], options) => {
+      try {
+        const details = await getTrackDetails(ids);
+        const detailsById = new Map(details.map((track) => [track.id, track]));
+        const ordered = ids.flatMap((id) => {
+          const track = detailsById.get(id);
+          return track ? [track] : [];
+        });
+        const built = await buildQueueTracks(ordered, options.quality as Quality);
+        if (built.tracks.length === 0) throw new Error('No playable tracks were found');
+        const snapshot = await getQueueController().add(built.tracks);
+        output({
+          added: built.tracks.length,
+          skipped: built.skipped,
+          queueLength: snapshot.tracks.length,
+          message: `Added ${built.tracks.length} track(s) to the queue`,
+        });
+      } catch (error) {
+        outputError('QUEUE_ERROR', error instanceof Error ? error.message : 'Failed');
+        process.exit(ExitCode.GENERAL_ERROR);
+      }
+    });
+
+  queue
+    .command('remove')
+    .description('Remove a track by its 1-based queue position')
+    .argument('<position>', 'Queue position')
+    .action(async (position: string) => {
+      try {
+        const index = Number.parseInt(position, 10) - 1;
+        const snapshot = await getQueueController().remove(index);
+        output({
+          queueLength: snapshot.tracks.length,
+          message: `Removed queue position ${position}`,
+        });
+      } catch (error) {
+        outputError('QUEUE_ERROR', error instanceof Error ? error.message : 'Failed');
+        process.exit(ExitCode.GENERAL_ERROR);
+      }
+    });
+
+  queue
+    .command('clear')
+    .description('Stop playback and clear the queue')
+    .action(async () => {
+      try {
+        await getQueueController().clear();
+        output({ message: 'Playback queue cleared' });
+      } catch (error) {
+        outputError('QUEUE_ERROR', error instanceof Error ? error.message : 'Failed');
+        process.exit(ExitCode.GENERAL_ERROR);
+      }
+    });
+
+  queue
+    .command('play')
+    .description('Start or resume the queue at a 1-based position')
+    .argument('[position]', 'Queue position')
+    .action(async (position?: string) => {
+      try {
+        const index = position === undefined ? undefined : Number.parseInt(position, 10) - 1;
+        const snapshot = await getQueueController().play(index);
+        output({ current: snapshot.current, message: `Now playing: ${snapshot.current?.title}` });
+      } catch (error) {
+        outputError('QUEUE_ERROR', error instanceof Error ? error.message : 'Failed');
         process.exit(ExitCode.GENERAL_ERROR);
       }
     });

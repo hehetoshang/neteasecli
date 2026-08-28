@@ -23,7 +23,7 @@
     "lint:fix": "eslint src/ --fix",
     "format": "prettier --write src/",
     "format:check": "prettier --check src/",
-    "test": "npm run build && node test/player-security.mjs && node test/mcp-signals.mjs && node test/mcp-silent-termination.mjs && node test/integration.mjs",
+    "test": "npm run build && node test/player-security.mjs && node test/player-queue.mjs && node test/output-modes.mjs && node test/mcp-signals.mjs && node test/mcp-silent-termination.mjs && node test/mcp-tools.mjs && node test/integration.mjs",
     "prepublishOnly": "npm run build"
   },
   "keywords": [

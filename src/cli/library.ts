@@ -3,9 +3,48 @@ import { getLikedTrackIds, likeTrack, getRecentTracks } from '../api/user.js';
 import { getTrackDetails } from '../api/track.js';
 import { output, outputError } from '../output/json.js';
 import { ExitCode } from '../types/index.js';
+import type { Quality } from '../types/index.js';
+import { getQueueController } from '../player/queue.js';
+import { buildQueueTracks, shuffled } from '../player/queue-tracks.js';
 
 export function createLibraryCommand(): Command {
   const library = new Command('library').description('User library');
+
+  library
+    .command('play-liked')
+    .description('Continuously play liked tracks')
+    .option('-l, --limit <number>', 'Track count limit', '50')
+    .option('--shuffle', 'Shuffle before playback')
+    .option('-q, --quality <level>', 'Quality: standard/higher/exhigh/lossless/hires', 'exhigh')
+    .action(async (options) => {
+      try {
+        const limit = parsePositiveLimit(options.limit);
+        const ids = await getLikedTrackIds();
+        const selectedIds = ids.slice(0, limit);
+        if (selectedIds.length === 0) throw new Error('No liked tracks found');
+        const details = await getTrackDetails(selectedIds);
+        const detailsById = new Map(details.map((track) => [track.id, track]));
+        const ordered = selectedIds.flatMap((id) => {
+          const track = detailsById.get(id);
+          return track ? [track] : [];
+        });
+        const source = options.shuffle ? shuffled(ordered) : ordered;
+        const built = await buildQueueTracks(source, options.quality as Quality);
+        if (built.tracks.length === 0) throw new Error('None of the liked tracks are playable');
+        const queue = await getQueueController().start(built.tracks);
+        output({
+          current: queue.current,
+          queued: queue.tracks.length,
+          skipped: built.skipped,
+          shuffle: Boolean(options.shuffle),
+          quality: options.quality,
+          message: `Playing liked tracks: ${queue.current?.title} (${queue.tracks.length} queued)`,
+        });
+      } catch (error) {
+        outputError('PLAYER_ERROR', error instanceof Error ? error.message : 'Playback failed');
+        process.exit(ExitCode.GENERAL_ERROR);
+      }
+    });
 
   library
     .command('liked')
@@ -93,4 +132,10 @@ export function createLibraryCommand(): Command {
     });
 
   return library;
+}
+
+function parsePositiveLimit(value: string): number {
+  const limit = Number.parseInt(value, 10);
+  if (!Number.isInteger(limit) || limit < 1) throw new Error('Limit must be a positive integer');
+  return limit;
 }

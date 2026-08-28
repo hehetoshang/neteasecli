@@ -9,7 +9,7 @@
  */
 
 import axios from 'axios';
-import type { Player, PlayerStatus } from './types.js';
+import type { Player, PlayerLoopContext, PlayerPlayOptions, PlayerStatus } from './types.js';
 import { bridgeClientConfig } from './bridge-security.js';
 
 // 网易云流 URL 防盗链检查的浏览器 UA
@@ -54,6 +54,7 @@ export class XiaoAiPlayer implements Player {
   private readonly baseUrl: string;
   private readonly client;
   private currentTitle?: string;
+  private currentUrl?: string;
   private currentDuration = 0;
   private loop = false;
   private lastStatus: PlayerStatus = {
@@ -71,7 +72,8 @@ export class XiaoAiPlayer implements Player {
     this.client = axios.create(config.axios);
   }
 
-  async play(url: string, title?: string): Promise<void> {
+  async play(url: string, title?: string, options?: PlayerPlayOptions): Promise<void> {
+    if (options?.loop !== undefined) this.loop = options.loop;
     const path = '/api/stream/play';
     let response;
     try {
@@ -91,6 +93,7 @@ export class XiaoAiPlayer implements Player {
       );
     }
     this.currentTitle = title;
+    this.currentUrl = url;
     this.currentDuration = Math.floor((response.data.data?.duration_ms || 0) / 1000);
     this.lastStatus = {
       title: this.currentTitle,
@@ -116,6 +119,7 @@ export class XiaoAiPlayer implements Player {
 
   async stop(): Promise<void> {
     await this.client.post(`${this.baseUrl}/api/stream/stop`).catch(() => {});
+    this.currentUrl = undefined;
     this.lastStatus = { ...this.lastStatus, playing: false, paused: false, position: 0 };
   }
 
@@ -142,11 +146,50 @@ export class XiaoAiPlayer implements Player {
     throw new Error('not supported on xiaoai player');
   }
 
-  async setLoop(mode: 'no' | 'inf' | 'force'): Promise<void> {
-    this.loop = mode !== 'no';
+  async setLoop(mode: 'no' | 'inf' | 'force', context?: PlayerLoopContext): Promise<void> {
+    const loop = mode !== 'no';
+    const status = await this.getStatus();
+    const currentlyLooping = status.loop !== 'no' && status.loop !== 'false';
+    if (currentlyLooping === loop) {
+      this.loop = loop;
+      return;
+    }
+
+    const url = context?.url || this.currentUrl;
+    if (status.playing && url) {
+      const path = '/api/stream/play';
+      let response;
+      try {
+        response = await this.client.post(`${this.baseUrl}${path}`, {
+          url,
+          loop,
+          start_ms: Math.round((context?.position ?? status.position) * 1000),
+          headers: { 'User-Agent': NET_EASE_UA },
+        });
+      } catch (error) {
+        throw bridgeRequestError('POST', path, error);
+      }
+      if (!response.data?.success) {
+        throw new Error(
+          `open-xiaoai-bridge POST ${path} returned success=false: ${sanitizeBridgeError(
+            response.data?.error,
+          )}`,
+        );
+      }
+      this.currentUrl = url;
+      this.currentTitle = context?.title || this.currentTitle;
+      if (status.paused) {
+        const pausePath = '/api/stream/pause';
+        try {
+          await this.client.post(`${this.baseUrl}${pausePath}`);
+        } catch (error) {
+          throw bridgeRequestError('POST', pausePath, error);
+        }
+        this.lastStatus.paused = true;
+      }
+    }
+    this.loop = loop;
     this.lastStatus.loop = this.loop ? 'inf' : 'no';
-    // 已播放中的歌曲需要重新设置循环：重新以当前 URL 播放会从头开始，
-    // 因此只更新标志，从下一首生效（与 MCP 的 repeat 工具语义一致）。
   }
 
   async getLoop(): Promise<string> {
@@ -158,12 +201,13 @@ export class XiaoAiPlayer implements Player {
       const response = await this.client.get(`${this.baseUrl}/api/stream/status`);
       const data = response.data?.data;
       if (data) {
+        this.loop = Boolean(data.loop);
         this.lastStatus = {
           title: this.currentTitle,
           position: Math.floor((data.position_ms || 0) / 1000),
           duration: Math.floor((data.duration_ms || this.currentDuration) / 1000),
           paused: data.state === 'paused',
-          playing: data.state === 'playing',
+          playing: data.state === 'playing' || data.state === 'paused',
           volume: 100,
           loop: data.loop ? 'inf' : 'no',
         };
