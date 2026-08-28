@@ -28,6 +28,42 @@ export {
 
 const QUALITY_VALUES = ['standard', 'higher', 'exhigh', 'lossless', 'hires'] as const;
 
+const SEARCH_TRACK_OUTPUT_SCHEMA = {
+  total: z.number().int().nonnegative(),
+  offset: z.number().int().nonnegative(),
+  limit: z.number().int().positive(),
+  tracks: z.array(
+    z.object({
+      id: z.string(),
+      name: z.string(),
+      artist: z.string(),
+      album: z.string(),
+      duration: z.number(),
+      uri: z.string(),
+    }),
+  ),
+};
+
+const QUEUE_TRACK_OUTPUT_SCHEMA = z.object({
+  id: z.string(),
+  title: z.string(),
+  quality: z.enum(QUALITY_VALUES),
+  duration: z.number().optional(),
+  position: z.number().int().positive(),
+  current: z.boolean(),
+});
+
+const QUEUE_STATUS_OUTPUT_SCHEMA = {
+  status: z.enum(['idle', 'playing', 'paused', 'stopped', 'finished']),
+  currentIndex: z.number().int().nonnegative().nullable(),
+  current: QUEUE_TRACK_OUTPUT_SCHEMA.nullable(),
+  remaining: z.number().int().nonnegative(),
+  repeat: z.boolean(),
+  history: z.array(z.string()),
+  tracks: z.array(QUEUE_TRACK_OUTPUT_SCHEMA),
+  total: z.number().int().nonnegative(),
+};
+
 function formatTrack(track: {
   id: string;
   name: string;
@@ -55,12 +91,30 @@ export async function startMcpServer(): Promise<void> {
       inputSchema: {
         query: z.string().describe('搜索关键词，如 "周杰伦 晴天"'),
         limit: z.number().int().min(1).max(20).default(5).describe('返回数量，默认 5'),
+        offset: z.number().int().min(0).default(0).describe('结果偏移量，默认 0'),
       },
+      outputSchema: SEARCH_TRACK_OUTPUT_SCHEMA,
     },
-    async ({ query, limit }) => {
-      const result = await search(query, 'track', limit);
+    async ({ query, limit, offset }) => {
+      const result = await search(query, 'track', limit, offset);
+      const structuredContent = {
+        total: result.total,
+        offset: result.offset,
+        limit: result.limit,
+        tracks: (result.tracks || []).map((track) => ({
+          id: track.id,
+          name: track.name,
+          artist: track.artists.map((artist) => artist.name).join(', '),
+          album: track.album.name,
+          duration: track.duration,
+          uri: track.uri,
+        })),
+      };
       if (!result.tracks || result.tracks.length === 0) {
-        return { content: [{ type: 'text' as const, text: `未找到与 "${query}" 相关的歌曲` }] };
+        return {
+          content: [{ type: 'text' as const, text: `未找到与 "${query}" 相关的歌曲` }],
+          structuredContent,
+        };
       }
       const lines = result.tracks.map((t) => formatTrack(t));
       return {
@@ -70,6 +124,7 @@ export async function startMcpServer(): Promise<void> {
             text: `搜索 "${query}" 共 ${result.total} 条结果：\n${lines.join('\n')}`,
           },
         ],
+        structuredContent,
       };
     },
   );
@@ -250,11 +305,9 @@ export async function startMcpServer(): Promise<void> {
     },
     async () => {
       const track = await getQueueController().next();
-      return {
-        content: [
-          { type: 'text' as const, text: track ? `正在播放：${track.title}` : '播放队列已结束' },
-        ],
-      };
+      return track
+        ? playbackStartedResult(`正在播放：${track.title}`)
+        : { content: [{ type: 'text' as const, text: '播放队列已结束' }] };
     },
   );
 
@@ -267,7 +320,7 @@ export async function startMcpServer(): Promise<void> {
     },
     async () => {
       const track = await getQueueController().previous();
-      return { content: [{ type: 'text' as const, text: `正在播放：${track.title}` }] };
+      return playbackStartedResult(`正在播放：${track.title}`);
     },
   );
 
@@ -277,6 +330,7 @@ export async function startMcpServer(): Promise<void> {
       title: '播放队列',
       description: '查看当前曲目、队列顺序、历史和剩余曲目数',
       inputSchema: {},
+      outputSchema: QUEUE_STATUS_OUTPUT_SCHEMA,
     },
     async () => {
       const queue = await getQueueController().sync();
@@ -285,7 +339,27 @@ export async function startMcpServer(): Promise<void> {
           `${index === queue.currentIndex ? '▶' : ' '} ${index + 1}. ${track.title} [id:${track.id}]`,
       );
       const summary = `状态：${queue.status}；当前：${queue.current?.title || '无'}；剩余：${queue.remaining}；历史：${queue.history.length}`;
-      return { content: [{ type: 'text' as const, text: `${summary}\n${lines.join('\n')}` }] };
+      const tracks = queue.tracks.map((track, index) => ({
+        id: track.id,
+        title: track.title,
+        quality: track.quality,
+        duration: track.duration,
+        position: index + 1,
+        current: index === queue.currentIndex,
+      }));
+      return {
+        content: [{ type: 'text' as const, text: `${summary}\n${lines.join('\n')}` }],
+        structuredContent: {
+          status: queue.status,
+          currentIndex: queue.currentIndex,
+          current: queue.currentIndex === null ? null : tracks[queue.currentIndex] || null,
+          remaining: queue.remaining,
+          repeat: queue.repeat,
+          history: queue.history,
+          tracks,
+          total: tracks.length,
+        },
+      };
     },
   );
 
@@ -299,6 +373,7 @@ export async function startMcpServer(): Promise<void> {
         shuffle: z.boolean().optional().default(false).describe('是否随机排序'),
         quality: z.enum(QUALITY_VALUES).optional().default('exhigh').describe('音质'),
       },
+      outputSchema: PLAYBACK_STARTED_OUTPUT_SCHEMA,
     },
     async ({ limit, shuffle, quality }) => {
       const ids = (await getLikedTrackIds()).slice(0, limit);
@@ -309,14 +384,9 @@ export async function startMcpServer(): Promise<void> {
       const built = await buildQueueTracks(source, quality as Quality);
       if (built.tracks.length === 0) throw new Error('没有可播放的喜欢歌曲');
       const queue = await getQueueController().start(built.tracks);
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: `正在播放我喜欢的音乐：${queue.current?.title}（队列 ${queue.tracks.length} 首，跳过 ${built.skipped.length} 首）`,
-          },
-        ],
-      };
+      return playbackStartedResult(
+        `正在播放我喜欢的音乐：${queue.current?.title}（队列 ${queue.tracks.length} 首，跳过 ${built.skipped.length} 首）`,
+      );
     },
   );
 
@@ -331,6 +401,7 @@ export async function startMcpServer(): Promise<void> {
         shuffle: z.boolean().optional().default(false).describe('是否随机排序'),
         quality: z.enum(QUALITY_VALUES).optional().default('exhigh').describe('音质'),
       },
+      outputSchema: PLAYBACK_STARTED_OUTPUT_SCHEMA,
     },
     async ({ playlist_id, limit, shuffle, quality }) => {
       const playlist = await getPlaylistDetail(playlist_id);
@@ -340,14 +411,9 @@ export async function startMcpServer(): Promise<void> {
       const built = await buildQueueTracks(source, quality as Quality);
       if (built.tracks.length === 0) throw new Error('歌单中没有可播放的歌曲');
       const queue = await getQueueController().start(built.tracks);
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: `正在播放歌单“${playlist.name}”：${queue.current?.title}（队列 ${queue.tracks.length} 首，跳过 ${built.skipped.length} 首）`,
-          },
-        ],
-      };
+      return playbackStartedResult(
+        `正在播放歌单“${playlist.name}”：${queue.current?.title}（队列 ${queue.tracks.length} 首，跳过 ${built.skipped.length} 首）`,
+      );
     },
   );
 

@@ -157,19 +157,34 @@ export class XiaoAiPlayer implements Player {
 
     const url = context?.url || this.currentUrl;
     if (status.playing && url) {
-      const response = await this.client.post(`${this.baseUrl}/api/stream/play`, {
-        url,
-        loop,
-        start_ms: Math.round((context?.position ?? status.position) * 1000),
-        headers: { 'User-Agent': NET_EASE_UA },
-      });
+      const path = '/api/stream/play';
+      let response;
+      try {
+        response = await this.client.post(`${this.baseUrl}${path}`, {
+          url,
+          loop,
+          start_ms: Math.round((context?.position ?? status.position) * 1000),
+          headers: { 'User-Agent': NET_EASE_UA },
+        });
+      } catch (error) {
+        throw bridgeRequestError('POST', path, error);
+      }
       if (!response.data?.success) {
-        throw new Error(response.data?.error || 'bridge repeat update failed');
+        throw new Error(
+          `open-xiaoai-bridge POST ${path} returned success=false: ${sanitizeBridgeError(
+            response.data?.error,
+          )}`,
+        );
       }
       this.currentUrl = url;
       this.currentTitle = context?.title || this.currentTitle;
       if (status.paused) {
-        await this.client.post(`${this.baseUrl}/api/stream/pause`);
+        const pausePath = '/api/stream/pause';
+        try {
+          await this.client.post(`${this.baseUrl}${pausePath}`);
+        } catch (error) {
+          throw bridgeRequestError('POST', pausePath, error);
+        }
         this.lastStatus.paused = true;
       }
     }

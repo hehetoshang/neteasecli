@@ -71,14 +71,32 @@ function outputPlain<T>(data: T): void {
 
   if (d.tracks && Array.isArray(d.tracks)) {
     for (const t of d.tracks as Record<string, unknown>[]) {
-      console.log([t.id, t.name, t.artist || formatArtists(t.artists), t.album, t.uri].join('\t'));
+      console.log(
+        [t.id, t.name, t.artist || formatArtists(t.artists), formatName(t.album), t.uri]
+          .map(formatScalar)
+          .join('\t'),
+      );
     }
     return;
   }
 
   if (d.playlists && Array.isArray(d.playlists)) {
     for (const p of d.playlists as Record<string, unknown>[]) {
-      console.log([p.id, p.name, p.trackCount, p.creator].join('\t'));
+      console.log([p.id, p.name, p.trackCount, formatName(p.creator)].map(formatScalar).join('\t'));
+    }
+    return;
+  }
+
+  if (d.albums && Array.isArray(d.albums)) {
+    for (const album of d.albums as Record<string, unknown>[]) {
+      console.log([album.id, album.name].map(formatScalar).join('\t'));
+    }
+    return;
+  }
+
+  if (d.artists && Array.isArray(d.artists)) {
+    for (const artist of d.artists as Record<string, unknown>[]) {
+      console.log([artist.id, artist.name].map(formatScalar).join('\t'));
     }
     return;
   }
@@ -139,6 +157,16 @@ function outputHuman<T>(data: T): void {
         `  ${dim(String(i + 1).padStart(2, ' '))}  ${bold(String(p.name))} ${dim(`(${p.trackCount} tracks)`)}`,
       );
     }
+    return;
+  }
+
+  if (d.albums && Array.isArray(d.albums)) {
+    outputNamedList(d.albums as Record<string, unknown>[]);
+    return;
+  }
+
+  if (d.artists && Array.isArray(d.artists)) {
+    outputNamedList(d.artists as Record<string, unknown>[]);
     return;
   }
 
@@ -225,6 +253,23 @@ function outputHuman<T>(data: T): void {
 function formatArtists(artists: unknown): string {
   if (!Array.isArray(artists)) return String(artists || '');
   return artists.map((a: any) => a.name || a).join(', ');
+}
+
+function formatName(value: unknown): unknown {
+  if (value && typeof value === 'object' && 'name' in value) {
+    return (value as { name?: unknown }).name;
+  }
+  return value;
+}
+
+function formatScalar(value: unknown): string {
+  return value === undefined || value === null ? '' : String(value);
+}
+
+function outputNamedList(items: Record<string, unknown>[]): void {
+  for (let index = 0; index < items.length; index += 1) {
+    console.log(`  ${dim(String(index + 1).padStart(2, ' '))}  ${bold(String(items[index].name))}`);
+  }
 }
 
 function formatDuration(ms: number): string {
