@@ -10,7 +10,7 @@ Search, play, download, and manage your library — all from the terminal with s
 - Playback via [mpv](https://mpv.io/) with persistent queues, automatic advance, previous/next, and IPC control
 - Track info, streaming URLs, lyrics, download
 - Library management (liked tracks, recent history)
-- Playlist browsing
+- Account playlist browsing and playback (liked, created, and subscribed playlists)
 - Browser cookie import from Chrome, Edge, Firefox, Safari via [sweet-cookie](https://github.com/steipete/sweet-cookie)
 - Multi-profile support for multiple accounts
 - Three output modes: colorized human-readable, JSON, plain text
@@ -161,7 +161,8 @@ AI（如经 bridge 的 MCP client 接入音箱语音对话）。
 neteasecli mcp   # stdio transport
 ```
 
-Tools: `search_track` / `play_track` / `play_liked` / `play_playlist` /
+Tools: `search_track` / `play_track` / `list_account_playlists` /
+`play_account_playlist` / `play_liked` / `play_playlist` /
 `next_track` / `previous_track` / `queue_status` / `pause` / `resume` / `stop` /
 `seek` / `status` / `repeat`. Pair with the bridge's `mcp_servers` config to let the
 speaker dialogue control NetEase music. / 工具列表如上；配合 bridge 的
@@ -184,8 +185,23 @@ neteasecli library recent          # Recently played / 最近播放
 neteasecli playlist list           # My playlists / 我的歌单
 neteasecli playlist detail <id>    # Playlist tracks / 歌单详情
 neteasecli playlist play <id>      # Continuously play playlist / 连续播放歌单
+neteasecli playlist play liked     # Stable alias for 我喜欢的音乐
+neteasecli playlist play 我的收藏   # Chinese alias for 我喜欢的音乐
+neteasecli playlist play 通勤       # Exact account-playlist name (must be unique)
 neteasecli playlist play <id> --limit 20 --shuffle --quality exhigh
 ```
+
+`playlist list` labels every account playlist as `liked`, `created`, or
+`subscribed` and returns its stable ID. Prefer IDs for automation. The only
+special aliases are `liked`, `我喜欢的音乐`, and `我的收藏`; all refer to the
+playlist marked by NetEase as the account's liked playlist. Other names require
+an exact, unique match, and duplicate names return `PLAYLIST_AMBIGUOUS` with the
+candidate IDs instead of choosing arbitrarily.
+
+MCP account-playlist failures use stable codes in the form `[CODE] message`:
+`AUTH_REQUIRED`, `AUTH_EXPIRED`, `PLAYLIST_NOT_FOUND`, `PLAYLIST_AMBIGUOUS`,
+`PLAYLIST_EMPTY`, `NO_PLAYABLE_TRACKS`, or `API_ERROR`. Credentials remain in
+the selected neteasecli profile and are never included in tool results.
 
 ## Global Options / 全局选项
 

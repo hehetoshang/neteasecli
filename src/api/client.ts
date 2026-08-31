@@ -8,6 +8,7 @@ import * as https from 'https';
 import { pipeline } from 'stream/promises';
 import type { Readable } from 'stream';
 import { verbose, debug } from '../output/logger.js';
+import { NeteaseCliError } from './errors.js';
 
 // Force IPv4 to avoid IPv6 CDN hotlink protection issues
 const httpAgent = new http.Agent({ family: 4 });
@@ -133,6 +134,13 @@ export class ApiClient {
       debug(`Response code: ${responseData.code ?? 200}`);
       if (responseData.code && responseData.code !== 200) {
         const msg = responseData.message || responseData.msg || 'Unknown error';
+        if (responseData.code === 301) {
+          const hasCredentials = getAuthManager().isAuthenticated();
+          throw new NeteaseCliError(
+            hasCredentials ? 'AUTH_EXPIRED' : 'AUTH_REQUIRED',
+            hasCredentials ? 'Session expired' : 'Not logged in',
+          );
+        }
         throw new Error(`${msg} (code: ${responseData.code})`);
       }
 
@@ -145,10 +153,13 @@ export class ApiClient {
           throw new Error('Network connection failed');
         }
         if (error.response?.status === 401) {
-          throw new Error('Authentication failed, please re-login');
+          throw new NeteaseCliError('AUTH_EXPIRED', 'Authentication failed, please re-login');
         }
         if (error.response?.status === 403) {
-          throw new Error('Access denied, login required or cookie expired');
+          throw new NeteaseCliError(
+            'AUTH_EXPIRED',
+            'Access denied, login required or cookie expired',
+          );
         }
         throw new Error(`Request failed: ${error.message}`);
       }
