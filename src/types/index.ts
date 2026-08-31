@@ -39,6 +39,11 @@ export interface Playlist {
     id: string;
     name: string;
   };
+  /** Account-library classification; absent for public search results. */
+  kind?: 'liked' | 'created' | 'subscribed';
+  owned?: boolean;
+  subscribed?: boolean;
+  aliases?: string[];
   tracks?: Track[];
 }
 

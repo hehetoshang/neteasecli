@@ -14,11 +14,16 @@ import { z } from 'zod';
 import { search } from '../api/search.js';
 import { getTrackDetail, getTrackDetails, getTrackUrl } from '../api/track.js';
 import { getLikedTrackIds } from '../api/user.js';
-import { getPlaylistDetail } from '../api/playlist.js';
+import {
+  getAccountPlaylists,
+  getPlaylistDetail,
+  resolveAccountPlaylistSelector,
+} from '../api/playlist.js';
+import { NeteaseCliError, normalizeNeteaseError } from '../api/errors.js';
 import { getPlayer } from '../player/index.js';
 import { getQueueController } from '../player/queue.js';
 import { buildQueueTracks, shuffled } from '../player/queue-tracks.js';
-import type { Quality } from '../types/index.js';
+import type { Playlist, Quality } from '../types/index.js';
 import { PLAYBACK_STARTED_OUTPUT_SCHEMA, playbackStartedResult } from './result-signals.js';
 
 export {
@@ -40,6 +45,23 @@ const SEARCH_TRACK_OUTPUT_SCHEMA = {
       album: z.string(),
       duration: z.number(),
       uri: z.string(),
+    }),
+  ),
+};
+
+const ACCOUNT_PLAYLIST_OUTPUT_SCHEMA = {
+  total: z.number().int().nonnegative(),
+  playlists: z.array(
+    z.object({
+      id: z.string(),
+      uri: z.string(),
+      name: z.string(),
+      kind: z.enum(['liked', 'created', 'subscribed']),
+      trackCount: z.number().int().nonnegative(),
+      owned: z.boolean(),
+      subscribed: z.boolean(),
+      aliases: z.array(z.string()),
+      creator: z.string().optional(),
     }),
   ),
 };
@@ -74,6 +96,36 @@ function formatTrack(track: {
   const minutes = Math.floor((track.duration || 0) / 60000);
   const secs = Math.floor(((track.duration || 0) % 60000) / 1000);
   return `${track.name} - ${artist} [id:${track.id}]${track.duration ? ` (${minutes}:${secs.toString().padStart(2, '0')})` : ''}`;
+}
+
+function mcpError(error: unknown) {
+  const normalized = normalizeNeteaseError(error);
+  return {
+    content: [{ type: 'text' as const, text: `[${normalized.code}] ${normalized.message}` }],
+    isError: true,
+  };
+}
+
+async function playPlaylist(
+  playlist: Playlist,
+  limit: number | undefined,
+  shuffle: boolean,
+  quality: Quality,
+) {
+  let source = playlist.tracks || [];
+  if (source.length === 0) {
+    throw new NeteaseCliError('PLAYLIST_EMPTY', `歌单“${playlist.name}”为空`);
+  }
+  if (limit !== undefined) source = source.slice(0, limit);
+  if (shuffle) source = shuffled(source);
+  const built = await buildQueueTracks(source, quality);
+  if (built.tracks.length === 0) {
+    throw new NeteaseCliError('NO_PLAYABLE_TRACKS', `歌单“${playlist.name}”中没有可播放的歌曲`);
+  }
+  const queue = await getQueueController().start(built.tracks);
+  return playbackStartedResult(
+    `正在播放歌单“${playlist.name}”：${queue.current?.title}（队列 ${queue.tracks.length} 首，跳过 ${built.skipped.length} 首）`,
+  );
 }
 
 export async function startMcpServer(): Promise<void> {
@@ -126,6 +178,50 @@ export async function startMcpServer(): Promise<void> {
         ],
         structuredContent,
       };
+    },
+  );
+
+  server.registerTool(
+    'list_account_playlists',
+    {
+      title: '列出账号歌单',
+      description:
+        '列出当前登录网易云账号的全部歌单，区分我喜欢的音乐、自己创建和收藏的歌单；返回稳定 playlist_id，播放时优先使用该 ID。',
+      inputSchema: {},
+      outputSchema: ACCOUNT_PLAYLIST_OUTPUT_SCHEMA,
+    },
+    async () => {
+      try {
+        const playlists = (await getAccountPlaylists()).map((playlist) => ({
+          id: playlist.id,
+          uri: `netease:playlist:${playlist.id}`,
+          name: playlist.name,
+          kind: playlist.kind,
+          trackCount: playlist.trackCount,
+          owned: playlist.owned,
+          subscribed: playlist.subscribed,
+          aliases: playlist.aliases,
+          creator: playlist.creator?.name,
+        }));
+        const lines = playlists.map(
+          (playlist) =>
+            `${playlist.name} [id:${playlist.id}]（${playlist.kind}，${playlist.trackCount} 首）`,
+        );
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text:
+                playlists.length > 0
+                  ? `账号歌单共 ${playlists.length} 个：\n${lines.join('\n')}`
+                  : '账号下没有歌单',
+            },
+          ],
+          structuredContent: { playlists, total: playlists.length },
+        };
+      } catch (error) {
+        return mcpError(error);
+      }
     },
   );
 
@@ -404,16 +500,37 @@ export async function startMcpServer(): Promise<void> {
       outputSchema: PLAYBACK_STARTED_OUTPUT_SCHEMA,
     },
     async ({ playlist_id, limit, shuffle, quality }) => {
-      const playlist = await getPlaylistDetail(playlist_id);
-      let source = playlist.tracks || [];
-      if (limit !== undefined) source = source.slice(0, limit);
-      if (shuffle) source = shuffled(source);
-      const built = await buildQueueTracks(source, quality as Quality);
-      if (built.tracks.length === 0) throw new Error('歌单中没有可播放的歌曲');
-      const queue = await getQueueController().start(built.tracks);
-      return playbackStartedResult(
-        `正在播放歌单“${playlist.name}”：${queue.current?.title}（队列 ${queue.tracks.length} 首，跳过 ${built.skipped.length} 首）`,
-      );
+      try {
+        const playlist = await getPlaylistDetail(playlist_id);
+        return await playPlaylist(playlist, limit, shuffle, quality as Quality);
+      } catch (error) {
+        return mcpError(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    'play_account_playlist',
+    {
+      title: '播放账号歌单',
+      description:
+        '播放当前登录账号的歌单。selector 优先使用 list_account_playlists 返回的稳定 ID；也支持唯一的精确名称，以及 liked/我喜欢的音乐/我的收藏别名。重名时必须改用 ID。',
+      inputSchema: {
+        selector: z.string().min(1).describe('歌单 ID、唯一精确名称或 liked/我喜欢的音乐/我的收藏'),
+        limit: z.number().int().min(1).max(1000).optional().describe('最多加入的歌曲数'),
+        shuffle: z.boolean().optional().default(false).describe('是否随机排序'),
+        quality: z.enum(QUALITY_VALUES).optional().default('exhigh').describe('音质'),
+      },
+      outputSchema: PLAYBACK_STARTED_OUTPUT_SCHEMA,
+    },
+    async ({ selector, limit, shuffle, quality }) => {
+      try {
+        const selected = await resolveAccountPlaylistSelector(selector);
+        const playlist = await getPlaylistDetail(selected.id);
+        return await playPlaylist(playlist, limit, shuffle, quality as Quality);
+      } catch (error) {
+        return mcpError(error);
+      }
     },
   );
 

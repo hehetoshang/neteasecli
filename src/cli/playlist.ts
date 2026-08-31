@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { getUserPlaylists, getPlaylistDetail } from '../api/playlist.js';
+import { getAccountPlaylists, getPlaylistBySelector, getPlaylistDetail } from '../api/playlist.js';
 import { output, outputError } from '../output/json.js';
 import { ExitCode } from '../types/index.js';
 import type { Quality } from '../types/index.js';
@@ -12,13 +12,13 @@ export function createPlaylistCommand(): Command {
   playlist
     .command('play')
     .description('Continuously play a playlist')
-    .argument('<id>', 'Playlist ID')
+    .argument('<selector>', 'Playlist ID, account playlist name, or liked/我喜欢的音乐/我的收藏')
     .option('-l, --limit <number>', 'Track count limit')
     .option('--shuffle', 'Shuffle before playback')
     .option('-q, --quality <level>', 'Quality: standard/higher/exhigh/lossless/hires', 'exhigh')
-    .action(async (id: string, options) => {
+    .action(async (selector: string, options) => {
       try {
-        const detail = await getPlaylistDetail(id);
+        const detail = await getPlaylistBySelector(selector);
         let tracks = detail.tracks || [];
         if (options.limit !== undefined) {
           const limit = Number.parseInt(options.limit, 10);
@@ -50,12 +50,16 @@ export function createPlaylistCommand(): Command {
     .description('List my playlists')
     .action(async () => {
       try {
-        const playlists = await getUserPlaylists();
+        const playlists = await getAccountPlaylists();
         output({
           playlists: playlists.map((p) => ({
             id: p.id,
             name: p.name,
             trackCount: p.trackCount,
+            kind: p.kind,
+            owned: p.owned,
+            subscribed: p.subscribed,
+            aliases: p.aliases,
             creator: p.creator?.name,
           })),
           total: playlists.length,

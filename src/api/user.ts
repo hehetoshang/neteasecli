@@ -1,5 +1,7 @@
 import { getApiClient } from './client.js';
 import type { Track, UserProfile } from '../types/index.js';
+import { NeteaseCliError } from './errors.js';
+import { getAuthManager } from '../auth/manager.js';
 
 interface NeteaseUserAccountResponse {
   code: number;
@@ -7,7 +9,7 @@ interface NeteaseUserAccountResponse {
     userId: number;
     nickname: string;
     avatarUrl?: string;
-  };
+  } | null;
 }
 
 interface NeteaseLikelistResponse {
@@ -60,8 +62,18 @@ function transformTrack(track: {
 }
 
 export async function getUserProfile(): Promise<UserProfile> {
+  if (!getAuthManager().isAuthenticated()) {
+    throw new NeteaseCliError('AUTH_REQUIRED', 'Not logged in');
+  }
   const client = getApiClient();
   const response = await client.request<NeteaseUserAccountResponse>('/nuser/account/get');
+  if (!response.profile) {
+    const hasCredentials = getAuthManager().isAuthenticated();
+    throw new NeteaseCliError(
+      hasCredentials ? 'AUTH_EXPIRED' : 'AUTH_REQUIRED',
+      hasCredentials ? 'Session expired' : 'Not logged in',
+    );
+  }
   return {
     id: String(response.profile.userId),
     nickname: response.profile.nickname,
